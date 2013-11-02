@@ -30,8 +30,8 @@ loadUpdateµs = 1000000
 runtimeµs :: Integer
 runtimeµs = 5000000
 
-leastLoad :: [Server] -> STM Server
-leastLoad = minByM serverLoad
+leastLoad :: [Server] -> STM [Server]
+leastLoad = minsByM serverLoad
 
 uniformRand :: Int -> IO Int
 uniformRand i = getStdRandom (randomR (0, i - 1))
@@ -72,7 +72,9 @@ randomLowerOfTwo = Client {
 overallLeast :: Client IO
 overallLeast = Client {
   nextJobInµs = uniformRand 1000,
-  pickServer = atomically . leastLoad,
+  pickServer = (\servers -> do
+    candidates <- atomically $ leastLoad servers
+    (candidates!!) <$> (uniformRand $ length candidates)),
   nextJob = stdJob
   }
 
@@ -81,7 +83,7 @@ main = withDataLog "datalog.json" process
   where
     process dataLog = do
       servers <- mapM (newServer loadUpdateµs baselineLoad (onLoadChange dataLog)) [1..serverCount]
-      runClient runtimeµs randomLowerOfTwo servers
+      runClient runtimeµs overallLeast servers
       traverse_ stopServer servers
       traverse_ waitForServer servers
     onLoadChange dataLog sid old new =

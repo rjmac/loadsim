@@ -3,6 +3,7 @@ module Util(
   sleep,
   logit,
   minByM,
+  minsByM,
   currentTime
 ) where
 
@@ -59,3 +60,8 @@ minByM f xs = do
   decorated <- decorateM f xs
   return $ fst $ minimumBy (compare `on` snd) $ decorated
 
+minsByM :: (Monad m, Ord b) => (a -> m b) -> [a] -> m [a]
+minsByM f xs = do
+  decorated <- decorateM f xs
+  let minKey = snd $ minimumBy (compare `on` snd) $ decorated
+  return $ map fst $ filter (\x -> snd x == minKey) $ decorated
