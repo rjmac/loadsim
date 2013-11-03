@@ -7,6 +7,7 @@ import Control.Concurrent.STM
 import Data.Foldable
 import Data.Aeson
 import System.Random
+import Data.Function
 
 import Server
 import Util
@@ -50,13 +51,12 @@ randomClient = Client {
 lower :: Server -> Server -> IO Server
 lower a b = do
   (advertA, advertB) <- atomically ((,) <$> serverLoad a <*> serverLoad b)
-  if advertisedLoad advertA < advertisedLoad advertB
-    then return a
-    else if advertisedLoad advertB < advertisedLoad advertA
-         then return b
-         else do
-           coin <- getStdRandom (randomR (False, True))
-           if coin then return a else return b
+  case (compare `on` advertisedLoad) advertA advertB of
+    LT -> return a
+    GT -> return b
+    EQ -> do
+      coin <- getStdRandom (randomR (False, True))
+      if coin then return a else return b
 
 randomLowerOfTwo :: Client IO
 randomLowerOfTwo = Client {
