@@ -1,6 +1,7 @@
 module Server (
   Job(..),
   Server,
+  Advertisement(..),
   newServer,
   sendJob,
   stopServer,
@@ -23,6 +24,11 @@ data Job = Job { heaviness :: Int
 
 data JobQueueEntry = JobEntry Job
                    | Quit
+                   deriving (Show, Read, Eq)
+
+data Advertisement = Advertisement { advertisedLoad :: Int
+                                   , advertisedTimeµs :: Integer
+                                   }
                    deriving (Show, Read, Eq)
 
 fetchJob :: TChan JobQueueEntry -> STM JobQueueEntry
@@ -71,16 +77,17 @@ data ServerState = ServerState {
 
 type ServerAction a = ReaderT ServerState IO a
 
-loadMonitorProcess :: Int -> Integer -> TVar Int -> TVar Int -> IO ()
+loadMonitorProcess :: Int -> Integer -> TVar Int -> TVar Advertisement -> IO ()
 loadMonitorProcess sId µs trueLoad visibleLoad = forever $ do
   logit sId "Updating visible state"
-  atomically $ readTVar trueLoad >>= writeTVar visibleLoad
+  now <- currentTime
+  atomically $ readTVar trueLoad >>= (\l -> writeTVar visibleLoad $ Advertisement { advertisedLoad = l, advertisedTimeµs = now })
   sleep µs
 
-newServerState :: Int -> TChan JobQueueEntry -> Integer -> TVar Int -> (Int -> Int -> Int -> IO ()) -> IO ServerState
+newServerState :: Int -> TChan JobQueueEntry -> Integer -> TVar Advertisement -> (Int -> Int -> Int -> IO ()) -> IO ServerState
 newServerState sId jobQueue loadUpdateµs visibleLoad onLoadChange = do
   sp <- newTVarIO S.empty
-  l <- atomically $ readTVar visibleLoad >>= newTVar
+  l <- atomically $ readTVar visibleLoad >>= newTVar . advertisedLoad
   lm <- forkIO $ loadMonitorProcess sId loadUpdateµs l visibleLoad
   return $ ServerState { myId = sId
                        , myQueue = jobQueue
@@ -133,14 +140,14 @@ serverMain = do
   process
   serverLog "exiting"
 
-serverProcess :: Int -> Integer -> TChan JobQueueEntry -> TVar Int -> (Int -> Int -> Int -> IO ()) -> IO ()
+serverProcess :: Int -> Integer -> TChan JobQueueEntry -> TVar Advertisement -> (Int -> Int -> Int -> IO ()) -> IO ()
 serverProcess sId loadUpdateµs jobQueue visibleLoad onLoadChange =
   newServerState sId jobQueue loadUpdateµs visibleLoad onLoadChange >>= runReaderT serverMain
 
 data Server = Server {
     serverId :: Int
   , serverQueue :: TChan JobQueueEntry
-  , serverVisibleLoad :: TVar Int
+  , serverVisibleLoad :: TVar Advertisement
   , serverThread :: ThreadId
   , serverTermination :: TMVar ()
   }
@@ -157,7 +164,8 @@ waitForServer s = atomically $ takeTMVar (serverTermination s)
 newServer :: Integer -> Int -> (Int -> Int -> Int -> IO ()) -> Int -> IO Server
 newServer loadUpdateµs baselineLoad onLoadChange sId = do
   queue <- newTChanIO
-  visibleLoad <- newTVarIO baselineLoad
+  now <- currentTime
+  visibleLoad <- newTVarIO $ Advertisement { advertisedLoad = baselineLoad, advertisedTimeµs = now }
   termination <- newEmptyTMVarIO
   thread <- forkIO $ finally (serverProcess sId loadUpdateµs queue visibleLoad onLoadChange) (atomically $ putTMVar termination ())
   return $ Server { serverId = sId
@@ -166,6 +174,6 @@ newServer loadUpdateµs baselineLoad onLoadChange sId = do
                   , serverThread = thread
                   , serverTermination = termination 
                   }
-serverLoad :: Server -> STM Int
+serverLoad :: Server -> STM Advertisement
 serverLoad = readTVar . serverVisibleLoad
 

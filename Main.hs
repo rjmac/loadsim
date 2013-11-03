@@ -31,7 +31,7 @@ runtimeµs :: Integer
 runtimeµs = 5000000
 
 leastLoad :: [Server] -> STM [Server]
-leastLoad = minsByM serverLoad
+leastLoad = minsByM (fmap advertisedLoad . serverLoad)
 
 uniformRand :: Int -> IO Int
 uniformRand i = getStdRandom (randomR (0, i - 1))
@@ -49,10 +49,10 @@ randomClient = Client {
 
 lower :: Server -> Server -> IO Server
 lower a b = do
-  (loadOfA, loadOfB) <- atomically ((,) <$> serverLoad a <*> serverLoad b)
-  if loadOfA < loadOfB
+  (advertA, advertB) <- atomically ((,) <$> serverLoad a <*> serverLoad b)
+  if advertisedLoad advertA < advertisedLoad advertB
     then return a
-    else if loadOfB < loadOfA
+    else if advertisedLoad advertB < advertisedLoad advertA
          then return b
          else do
            coin <- getStdRandom (randomR (False, True))
